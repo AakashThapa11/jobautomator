@@ -47,3 +47,4 @@ node_modules
 .env*
 Dockerfile
 .dockerignore
+docker-compose.yml
