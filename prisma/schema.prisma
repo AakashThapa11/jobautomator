@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,29 +8,30 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String?
-  email         String?   @unique
+  email         String?      @unique
   emailVerified DateTime?
   image         String?
   accounts      Account[]
   sessions      Session[]
+  profile       UserProfile? // ✅ Removed incorrect @relation, just reference UserProfile
 }
 
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String?  @db.Text
-  access_token       String?  @db.Text
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String?  @db.Text
-  session_state      String?
-  user               User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -47,4 +42,28 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserProfile {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade) // ✅ Defined relation only here
+  fullName           String?
+  email              String?  @unique
+  phoneNumber        String?
+  linkedinUrl        String?
+  portfolioUrl       String?
+  jobTitles          String[] // Extracted or manually added
+  skills             String[] // Extracted from resume or manually entered
+  experience         Int? // Extracted from resume or manually entered
+  education          String?
+  jobType            String? // Full-time, Part-time, etc.
+  industries         String[]
+  autoApply          Boolean  @default(false)
+  dailyLimit         Int      @default(10)
+  approveBeforeApply Boolean  @default(true)
+  resumePath         String? // Path to uploaded resume
+  coverLetterPath    String? // Path to uploaded cover letter
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
