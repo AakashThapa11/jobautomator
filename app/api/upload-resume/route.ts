@@ -5,11 +5,19 @@ import path from "path";
 import { Readable } from "stream";
 import mammoth from "mammoth";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf";
+import { pathToFileURL } from "url";
+import OpenAI from "openai";
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
-export const config = { api: { bodyParser: false } }; 
+const workerPath = path.join(process.cwd(), "node_modules/pdfjs-dist/build/pdf.worker.mjs");
+pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
 
+export const config = { api: { bodyParser: false } };
+
+// ✅ Fix: Add `convertNextRequestToIncomingMessage` function
 async function convertNextRequestToIncomingMessage(req: NextRequest): Promise<any> {
   const buffer = Buffer.from(await req.arrayBuffer()); 
   const stream = Readable.from([buffer]); 
@@ -20,61 +28,60 @@ async function convertNextRequestToIncomingMessage(req: NextRequest): Promise<an
   });
 }
 
-async function extractTextFromDOCX(filePath: string): Promise<string> {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    const { value } = await mammoth.extractRawText({ buffer });
-    return value;
-  } catch (error) {
-    console.error("Error extracting text from DOCX:", error);
-    return "";
+async function extractTextFromPDF(filePath: string): Promise<string> {
+  const data = new Uint8Array(fs.readFileSync(filePath));
+  const loadingTask = pdfjs.getDocument({ data });
+  const pdf = await loadingTask.promise;
+  let text = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const extractedText = content.items.map((item: any) => item.str).join(" ");
+    text += extractedText + " ";
   }
+
+  return text.trim();
 }
 
-async function extractTextFromPDF(filePath: string): Promise<string> {
-    try {
-      const data = new Uint8Array(fs.readFileSync(filePath));
-      const loadingTask = pdfjs.getDocument({ data });
-      const pdf = await loadingTask.promise;
-      let text = "";
-  
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        
-        if (!content.items) {
-          console.log(`Page ${i} has no text content.`);
-          continue;
-        }
-  
-        
-        const extractedText = content.items
-          .map((item: any) => (item.str ? item.str : ""))
-          .join(" ");
-  
-        console.log(`Page ${i} Extracted Text:`, extractedText);
-        text += extractedText + " ";
-      }
-  
-      console.log("Final extracted text:", text.trim());
-      return text.trim();
-    } catch (error) {
-      console.error("Error extracting text from PDF:", error);
-      return "";
-    }
+async function extractTextFromDOCX(filePath: string): Promise<string> {
+  const buffer = fs.readFileSync(filePath);
+  const { value } = await mammoth.extractRawText({ buffer });
+  return value.trim();
+}
+
+async function extractProfileData(resumeText: string) {
+  const prompt = `You are an AI that extracts structured data from resumes. Please analyze the following resume text and return a structured JSON.
+
+  Resume text: """${resumeText}"""`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4-turbo",
+    messages: [{ role: "system", content: prompt }],
+    temperature: 0,
+  });
+
+  let gptResponse = response.choices[0].message.content.trim();
+
+  // ✅ Remove Markdown formatting (` ```json ... ``` `) if present
+  if (gptResponse.startsWith("```json")) {
+    gptResponse = gptResponse.replace(/```json/, "").replace(/```/, "").trim();
   }
-  
-  
+
+  console.log("GPT Response:", gptResponse);
+
+  return JSON.parse(gptResponse);
+}
+
 
 export async function POST(req: NextRequest) {
   try {
     const form = new IncomingForm({ uploadDir: path.join(process.cwd(), "public/uploads"), keepExtensions: true });
-    const nodeReq = await convertNextRequestToIncomingMessage(req); 
+    const nodeReq = await convertNextRequestToIncomingMessage(req); // ✅ Now this function is defined
 
     return new Promise((resolve, reject) => {
       form.parse(nodeReq, async (err, fields, files) => {
         if (err) {
-          console.error("File parsing error:", err);
           reject(new NextResponse(JSON.stringify({ error: "File parsing failed" }), { status: 500 }));
           return;
         }
@@ -86,8 +93,6 @@ export async function POST(req: NextRequest) {
 
         const file = files.resume[0];
         const uploadDir = path.join(process.cwd(), "public/uploads");
-
-        
         if (!fs.existsSync(uploadDir)) {
           fs.mkdirSync(uploadDir, { recursive: true });
         }
@@ -97,11 +102,10 @@ export async function POST(req: NextRequest) {
         const timestamp = Date.now();
         const newFileName = `${sanitizedFileName}-${timestamp}${fileExtension}`;
         const newFilePath = path.join(uploadDir, newFileName);
+        const publicFilePath = `/uploads/${newFileName}`;
 
-        
         fs.renameSync(file.filepath, newFilePath);
 
-        
         let extractedText = "";
         if (file.mimetype === "application/pdf") {
           extractedText = await extractTextFromPDF(newFilePath);
@@ -109,10 +113,12 @@ export async function POST(req: NextRequest) {
           extractedText = await extractTextFromDOCX(newFilePath);
         }
 
+        const extractedData = await extractProfileData(extractedText);
+
         resolve(new NextResponse(JSON.stringify({
           message: "File uploaded and text extracted successfully!",
-          filePath: `/uploads/${newFileName}`,
-          extractedText,
+          filePath: publicFilePath,
+          extractedData,
         }), { status: 200 }));
       });
     });

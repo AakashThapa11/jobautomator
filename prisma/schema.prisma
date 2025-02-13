@@ -15,7 +15,7 @@ model User {
   image         String?
   accounts      Account[]
   sessions      Session[]
-  profile       UserProfile? // ✅ Removed incorrect @relation, just reference UserProfile
+  profile       UserProfile?
 }
 
 model Account {
@@ -47,18 +47,19 @@ model Session {
 model UserProfile {
   id                 String   @id @default(uuid())
   userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade) // ✅ Defined relation only here
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   fullName           String?
   email              String?  @unique
   phoneNumber        String?
   linkedinUrl        String?
   portfolioUrl       String?
-  jobTitles          String[] // Extracted or manually added
-  skills             String[] // Extracted from resume or manually entered
-  experience         Int? // Extracted from resume or manually entered
+  jobTitles          String[] // ✅ Array to store multiple job titles
+  skills             String[] // ✅ Extracted from resume or manually entered
+  experience         Int? // ✅ Ensure experience is stored as an integer
   education          String?
+  preferredLocation  String? // ✅ New field to store job location preference
   jobType            String? // Full-time, Part-time, etc.
-  industries         String[]
+  industries         String[] // ✅ Extracted from resume
   autoApply          Boolean  @default(false)
   dailyLimit         Int      @default(10)
   approveBeforeApply Boolean  @default(true)
